@@ -26,3 +26,42 @@ test('library can be used from CommonJS', { annotation: { type: 'issue', descrip
  `);
   expect(child_process.execSync(`node ${file}`, { encoding: 'utf-8' })).toContain('OK');
 });
+
+test('embedded connection lets Node exit naturally after a completed action', async ({ server, mcpBrowser }, testInfo) => {
+  test.skip(!['chrome', 'chromium', 'msedge'].includes(mcpBrowser!), 'Launches a Chromium-based browser');
+  server.setContent('/', `<button onclick="fetch('/ping')">Ping</button>`, 'text/html');
+  server.setContent('/ping', 'pong', 'text/plain');
+  const file = testInfo.outputPath('main.cjs');
+  await fs.writeFile(file, `
+    const { chromium } = require('playwright-core');
+    const { tools } = require('playwright-core/lib/coreBundle');
+    const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
+    const { InMemoryTransport } = require('@modelcontextprotocol/sdk/inMemory.js');
+    (async () => {
+      const browser = await chromium.launch({ channel: ${JSON.stringify(mcpBrowser === 'chromium' ? undefined : mcpBrowser)} });
+      const context = await browser.newContext();
+      const server = await tools.createConnection({}, async () => context);
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      await server.connect(serverTransport);
+      const client = new Client({ name: 'test', version: '1.0.0' });
+      await client.connect(clientTransport);
+      await client.callTool({ name: 'browser_navigate', arguments: { url: ${JSON.stringify(server.PREFIX)} } });
+      await client.callTool({ name: 'browser_click', arguments: { element: 'Ping button', target: 'e2' } });
+      await client.close();
+      await server.close();
+      await browser.close();
+      process.stdout.write('CLOSED\\n');
+    })();
+  `);
+  const child = child_process.spawn('node', [file], { stdio: ['ignore', 'pipe', 'inherit'] });
+  let closedAt: number | undefined;
+  child.stdout.on('data', data => {
+    if (data.toString().includes('CLOSED'))
+      closedAt = Date.now();
+  });
+  const exitCode = await new Promise(resolve => child.on('exit', resolve));
+  expect(exitCode).toBe(0);
+  expect(closedAt).toBeDefined();
+  // A request-tracking timer that outlives the action would hold the process for up to five seconds.
+  expect(Date.now() - closedAt!).toBeLessThan(2000);
+});

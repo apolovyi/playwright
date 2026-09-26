@@ -48,8 +48,11 @@ export async function waitForCompletion<R>(tab: Tab, callback: () => Promise<R>)
     else
       promises.push(request.response().catch(() => {}));
   }
-  const timeout = new Promise<void>(resolve => setTimeout(resolve, 5000));
-  await Promise.race([Promise.all(promises), timeout]);
+  let timeoutId: NodeJS.Timeout | undefined;
+  const timeout = new Promise<void>(resolve => {
+    timeoutId = setTimeout(resolve, 5000);
+  });
+  await Promise.race([Promise.all(promises), timeout]).finally(() => clearTimeout(timeoutId));
   if (requests.length)
     await tab.waitForTimeout(settleMs);
 
