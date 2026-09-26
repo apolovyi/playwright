@@ -15,11 +15,14 @@
  */
 
 import { EventEmitter } from 'events';
+import fs from 'fs';
+import path from 'path';
 import debug from 'debug';
 import { asLocator } from '@isomorphic/locatorGenerators';
 import { locatorOrSelectorAsSelector } from '@isomorphic/locatorParser';
 import { ManualPromise } from '@isomorphic/manualPromise';
 import { eventsHelper } from '@utils/eventsHelper';
+import { addSuffixToFilePath } from '@utils/fileUtils';
 import { disposeAll } from '@isomorphic/disposable';
 import { waitForCompletion, eventWaiter } from './utils';
 import { LogFile } from './logFile';
@@ -46,6 +49,7 @@ type Download = {
   download: playwright.Download;
   finished: boolean;
   outputFile: string;
+  collisionAvoided: boolean;
 };
 
 type ConsoleLogEntry = {
@@ -225,15 +229,43 @@ export class Tab extends EventEmitter<TabEventsInterface> {
 
   private async _downloadStarted(download: playwright.Download) {
     // Do not trust web names.
-    const outputFile = await this.context.outputFile({ suggestedFilename: sanitizeForFilePath(download.suggestedFilename()), prefix: 'download', ext: 'bin' }, { origin: 'code' });
-    const entry = {
+    const baseOutputFile = await this.context.outputFile({ suggestedFilename: sanitizeForFilePath(download.suggestedFilename()), prefix: 'download', ext: 'bin' }, { origin: 'code' });
+    // Downloads with the same suggested name resolve to the same path. Save privately, then
+    // hard-link to the first free name: link() fails with EEXIST instead of overwriting.
+    const temporaryDir = await fs.promises.mkdtemp(`${baseOutputFile}.playwright-`);
+    const temporaryFile = path.join(temporaryDir, 'payload');
+    const entry: Download = {
       download,
       finished: false,
-      outputFile,
+      outputFile: baseOutputFile,
+      collisionAvoided: false,
     };
     this._downloads.push(entry);
     this._addLogEntry({ type: 'download-start', wallTime: Date.now(), download: entry });
-    await download.saveAs(entry.outputFile);
+    let primaryError: unknown;
+    try {
+      await download.saveAs(temporaryFile);
+      for (let suffix = 0; ; suffix++) {
+        const candidate = suffix ? addSuffixToFilePath(baseOutputFile, ` (${suffix})`) : baseOutputFile;
+        try {
+          await fs.promises.link(temporaryFile, candidate);
+          entry.outputFile = candidate;
+          entry.collisionAvoided = suffix > 0;
+          break;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'EEXIST')
+            throw error;
+        }
+      }
+    } catch (error) {
+      primaryError = error;
+      throw error;
+    } finally {
+      await fs.promises.rm(temporaryDir, { recursive: true }).catch(cleanupError => {
+        if (!primaryError)
+          throw cleanupError;
+      });
+    }
     entry.finished = true;
     this._addLogEntry({ type: 'download-finish', wallTime: Date.now(), download: entry });
   }
