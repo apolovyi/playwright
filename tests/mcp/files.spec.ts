@@ -137,6 +137,41 @@ test('clicking on download link emits download', async ({ startClient, server },
 - Downloaded file test.txt to "output${path.sep}test.txt"`);
 });
 
+test('download does not overwrite an existing file with the same name', async ({ startClient, server }, testInfo) => {
+  const outputDir = testInfo.outputPath('output');
+  await fs.mkdir(outputDir, { recursive: true });
+  await fs.writeFile(path.join(outputDir, 'test.txt'), 'Existing');
+  const { client } = await startClient({
+    config: { outputDir },
+  });
+
+  server.setContent('/', `<a href="/download" download="test.txt">Download</a>`, 'text/html');
+  server.setContent('/download', 'Data', 'text/plain');
+
+  await client.callTool({
+    name: 'browser_navigate',
+    arguments: { url: server.PREFIX },
+  });
+  const response = await client.callTool({
+    name: 'browser_click',
+    arguments: {
+      element: 'Download link',
+      target: 'e2',
+    },
+  });
+  let events = parseResponse(response).events;
+  await expect.poll(async () => {
+    const p = parseResponse(await client.callTool({ name: 'browser_snapshot' }));
+    if (p.events)
+      events += '\n' + p.events;
+    return events;
+  }).toContain(`- Downloaded file test.txt to "output${path.sep}test (1).txt" (renamed to avoid overwriting an existing file)`);
+
+  expect(await fs.readFile(path.join(outputDir, 'test.txt'), 'utf8')).toBe('Existing');
+  expect(await fs.readFile(path.join(outputDir, 'test (1).txt'), 'utf8')).toBe('Data');
+  expect((await fs.readdir(outputDir)).filter(name => name.includes('.playwright-'))).toEqual([]);
+});
+
 test('navigating to download link emits download', async ({ startClient, server, mcpBrowser }, testInfo) => {
   test.skip(mcpBrowser !== 'chromium', 'This test is racy');
   const { client } = await startClient({

@@ -303,7 +303,7 @@ export class Response {
         if (event.type === 'download-start')
           text.push(`- Downloading file ${event.download.download.suggestedFilename()} ...`);
         else if (event.type === 'download-finish')
-          text.push(`- Downloaded file ${event.download.download.suggestedFilename()} to "${this._computeRelativeTo(event.download.outputFile)}"`);
+          text.push(`- Downloaded file ${event.download.download.suggestedFilename()} to "${this._computeRelativeTo(event.download.outputFile)}"${event.download.collisionAvoided ? ' (renamed to avoid overwriting an existing file)' : ''}`);
       }
     }
     if (text.length)
