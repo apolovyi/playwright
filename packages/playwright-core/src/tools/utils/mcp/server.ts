@@ -128,7 +128,11 @@ const initializeServer = async (server: ServerType, factory: ServerBackendFactor
   const capabilities = server.getClientCapabilities();
   let clientRoots: Root[] = [];
   if (capabilities?.roots) {
-    await Promise.race([transportInitialized, new Promise<void>(f => setTimeout(f, 5000))]);
+    let timeoutId: NodeJS.Timeout | undefined;
+    const timeout = new Promise<void>(f => {
+      timeoutId = setTimeout(f, 5000);
+    });
+    await Promise.race([transportInitialized, timeout]).finally(() => clearTimeout(timeoutId));
     const { roots } = await server.listRoots().catch(e => {
       serverDebug(e);
       return { roots: [] };
