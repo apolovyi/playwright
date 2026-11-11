@@ -38,6 +38,7 @@ import { ProgrammaticRecorderApp, RecorderApp } from '../recorder/recorderApp';
 import { ElementHandleDispatcher } from './elementHandlerDispatcher';
 import { JSHandleDispatcher } from './jsHandleDispatcher';
 import { disposeAll } from '../disposable';
+import { nullProgress } from '../progress';
 
 import type { ConsoleMessage } from '../console';
 import type { Dialog } from '../dialog';
@@ -62,6 +63,8 @@ export class BrowserContextDispatcher extends Dispatcher<BrowserContext, channel
   private _interceptionUrlMatchers: URLMatch[] = [];
   private _routeWebSocketInitScript: InitScript | undefined;
   private _recorderApp: ProgrammaticRecorderApp | undefined;
+  // Pages this connection opened, directly or through an opener chain; they close when the connection goes away.
+  private _connectionPages = new Set<Page>();
 
   static from(parentScope: DispatcherScope, context: BrowserContext): BrowserContextDispatcher {
     const result = parentScope.connection.existingDispatcher<BrowserContextDispatcher>(context);
@@ -103,7 +106,10 @@ export class BrowserContextDispatcher extends Dispatcher<BrowserContext, channel
 
     for (const page of context.pages())
       this._dispatchEvent('page', { page: PageDispatcher.from(this, page) });
-    this.addObjectListener(BrowserContext.Events.Page, page => {
+    this.addObjectListener(BrowserContext.Events.Page, (page: Page) => {
+      const opener = page.opener();
+      if (opener && this._connectionPages.has(opener))
+        this._connectionPages.add(page);
       this._dispatchEvent('page', { page: PageDispatcher.from(this, page) });
     });
     this.addObjectListener(BrowserContext.Events.Close, () => {
@@ -261,7 +267,9 @@ export class BrowserContextDispatcher extends Dispatcher<BrowserContext, channel
   }
 
   async newPage(params: channels.BrowserContextNewPageParams, progress: Progress): Promise<channels.BrowserContextNewPageResult> {
-    return { page: PageDispatcher.from(this, await this._context.newPage(progress)) };
+    const page = await this._context.newPage(progress);
+    this._connectionPages.add(page);
+    return { page: PageDispatcher.from(this, page) };
   }
 
   async cookies(params: channels.BrowserContextCookiesParams, progress: Progress): Promise<channels.BrowserContextCookiesResult> {
@@ -453,6 +461,10 @@ export class BrowserContextDispatcher extends Dispatcher<BrowserContext, channel
     // Avoid protocol calls for the closed context.
     if (this._context.isClosingOrClosed())
       return;
+
+    for (const page of this._connectionPages)
+      page.close(nullProgress).catch(() => {});
+    this._connectionPages.clear();
 
     // Cleanup properly and leave the page in a good state. Other clients may still connect and use it.
     this._context.dialogManager.removeDialogHandler(this._dialogHandler);

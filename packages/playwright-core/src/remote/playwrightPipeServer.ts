@@ -26,6 +26,10 @@ import { Browser } from '../server/browser';
 
 import type { PlaywrightInitializeResult } from './playwrightConnection';
 
+// A client that has exchanged nothing with the server for this long is presumed hung or stopped; dropping it
+// releases the pages it opened. Any traffic in either direction restarts the clock.
+const kSilentConnectionTimeout = Number(process.env.PWTEST_PIPE_SILENT_CONNECTION_TIMEOUT || 2 * 60 * 60 * 1000);
+
 export class PlaywrightPipeServer {
   private _server: net.Server | undefined;
   private _connections = new Set<PlaywrightConnection>();
@@ -49,6 +53,10 @@ export class PlaywrightPipeServer {
     this._server = net.createServer(socket => {
       const id = String(++this._connectionId);
       debugLogger.log('server', `[${id}] pipe client connected`);
+      socket.setTimeout(kSilentConnectionTimeout, () => {
+        debugLogger.log('server', `[${id}] dropping silent pipe client`);
+        socket.destroy();
+      });
       const transport = new SocketServerTransport(socket);
       const connection = new PlaywrightConnection(
           new Semaphore(1),

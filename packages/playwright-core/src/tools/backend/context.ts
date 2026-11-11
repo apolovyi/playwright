@@ -54,6 +54,7 @@ export type ContextConfig = {
   saveSession?: boolean;
   secrets?: Record<string, string>;
   sharedBrowserContext?: boolean;
+  ownTabsOnly?: boolean;
   snapshot?: {
     mode?: 'full' | 'none';
     boxes?: boolean;
@@ -198,6 +199,7 @@ export class Context {
   async newTab(isolatedContext?: string): Promise<Tab> {
     const browserContext = await this.ensureBrowserContext(isolatedContext);
     const page = await browserContext.newPage();
+    this._adoptPage(page, isolatedContext);
     this._setCurrentTab(this._tabs.find(t => t.page === page)!);
     return this._currentTab!;
   }
@@ -355,6 +357,19 @@ export class Context {
   }
 
   private _onPageCreated(page: playwrightTypes.Page, isolatedContext: string | undefined) {
+    // Isolated contexts belong to this client entirely, whoever opened the page.
+    if (this.config.ownTabsOnly && !isolatedContext) {
+      // eslint-disable-next-line no-restricted-syntax -- opener() is async and hides an opener that already closed; ownership must be decided synchronously, when the page appears.
+      const opener = (page as any)._opener as playwrightTypes.Page | null;
+      if (!opener || !this._tabs.some(tab => tab.page === opener))
+        return;
+    }
+    this._adoptPage(page, isolatedContext);
+  }
+
+  private _adoptPage(page: playwrightTypes.Page, isolatedContext: string | undefined) {
+    if (this._tabs.some(tab => tab.page === page))
+      return;
     const tab = new Tab(this, page, isolatedContext, tab => this._onPageClosed(tab));
     this._tabs.push(tab);
     if (!this._currentTab)

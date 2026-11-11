@@ -153,6 +153,12 @@ export type Config = {
   sharedBrowserContext?: boolean;
 
   /**
+   * The browser context is shared with other clients, each of which owns its own tabs. This client never adopts
+   * pages that it did not open; it sees, selects and closes only the tabs it opened, directly or through popups.
+   */
+  ownTabsOnly?: boolean;
+
+  /**
    * Secrets are used to replace matching plain text in the tool responses to prevent the LLM
    * from accidentally getting sensitive data. It is a convenience and not a security feature,
    * make sure to always examine information coming in and from the tool on the client.
