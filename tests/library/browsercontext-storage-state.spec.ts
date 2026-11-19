@@ -502,7 +502,8 @@ it('should work when service worker is intefering and the origin is not open', a
   expect(storageState.origins[0].localStorage).toEqual([{ name: 'foo', value: 'bar' }]);
 });
 
-it('should set local storage in third-party context', async ({ contextFactory, server }) => {
+it('should set local storage in third-party context', async ({ contextFactory, server, browserName }) => {
+  it.skip(browserName === 'chromium', 'Chromium partitions third-party storage, as stock Chrome does');
   const context = await contextFactory({
     storageState: {
       cookies: [],
@@ -526,7 +527,8 @@ it('should set local storage in third-party context', async ({ contextFactory, s
   await context.close();
 });
 
-it('should roundtrip local storage in third-party context', async ({ page, contextFactory, server }) => {
+it('should roundtrip local storage in third-party context', async ({ page, contextFactory, server, browserName }) => {
+  it.skip(browserName === 'chromium', 'Chromium partitions third-party storage, as stock Chrome does');
   await page.goto(server.EMPTY_PAGE);
   const frame = await attachFrame(page, 'frame1', server.CROSS_PROCESS_PREFIX + '/empty.html');
   await frame.evaluate(() => window.localStorage.setItem('name1', 'value1'));
@@ -540,6 +542,15 @@ it('should roundtrip local storage in third-party context', async ({ page, conte
   const localStorage = await frame2.evaluate('window.localStorage');
   expect(localStorage).toEqual({ name1: 'value1' });
   await context2.close();
+});
+
+it('should partition third-party local storage in chromium', async ({ page, server, browserName }) => {
+  it.skip(browserName !== 'chromium', 'Stock Chrome partitions third-party storage; other engines are configured separately');
+  await page.goto(server.CROSS_PROCESS_PREFIX + '/empty.html');
+  await page.evaluate(() => window.localStorage.setItem('name1', 'value1'));
+  await page.goto(server.EMPTY_PAGE);
+  const frame = await attachFrame(page, 'frame1', server.CROSS_PROCESS_PREFIX + '/empty.html');
+  expect(await frame.evaluate('window.localStorage')).toEqual({});
 });
 
 it('should support IndexedDB', async ({ page, server, contextFactory }) => {

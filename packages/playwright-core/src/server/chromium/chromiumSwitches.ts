@@ -32,8 +32,6 @@ const disabledFeatures = [
   'MediaRouter',
   // See https://github.com/microsoft/playwright/issues/28023
   'PaintHolding',
-  // See https://github.com/microsoft/playwright/issues/32230
-  'ThirdPartyStoragePartitioning',
   // Chromium 149 rejects re-applying the `origin` header on a redirect (as request interception
   // does) with net::ERR_INVALID_ARGUMENT. See https://github.com/microsoft/playwright/issues/41690
   'BlockOriginHeaderModificationOnRedirect',
