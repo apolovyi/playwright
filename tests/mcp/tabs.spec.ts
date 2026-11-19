@@ -120,6 +120,24 @@ test('select tab', async ({ client }) => {
   });
 });
 
+test('selecting a tab does not bring it to the front', async ({ startClient }) => {
+  const { client, stderr } = await startClient({ env: { DEBUG: 'pw:protocol' } });
+  await createTab(client, 'Tab one', 'Body one');
+
+  expect(await client.callTool({
+    name: 'browser_tabs',
+    arguments: {
+      action: 'select',
+      index: 0,
+    },
+  })).toHaveResponse({
+    result: `- 0: (current) [](about:blank)
+- 1: [Tab one](data:text/html,<title>Tab one</title><body>Body one</body>)`,
+  });
+  expect(stderr()).toContain('pw:protocol');
+  expect(stderr().match(/"method":"\w+\.bringToFront"/g)).toBeNull();
+});
+
 test('close tab', async ({ client }) => {
   await createTab(client, 'Tab one', 'Body one');
   await createTab(client, 'Tab two', 'Body two');
