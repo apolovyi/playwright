@@ -378,7 +378,8 @@ export class CRBrowserContext extends BrowserContext<CREventsMap> {
   }
 
   override async doCreateNewPage(): Promise<Page> {
-    const { targetId } = await this._browser._session.send('Target.createTarget', { url: 'about:blank', browserContextId: this._browserContextId });
+    // A served browser's window belongs to whoever is watching it, so a client's new tab must not raise it.
+    const { targetId } = await this._browser._session.send('Target.createTarget', { url: 'about:blank', browserContextId: this._browserContextId, background: this._browser.isServed() });
     return this._browser._crPages.get(targetId)!._page;
   }
 

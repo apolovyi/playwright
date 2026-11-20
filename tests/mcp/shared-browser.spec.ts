@@ -29,7 +29,7 @@ import { tools } from '../../packages/playwright-core/lib/coreBundle';
 
 import type { Browser } from 'playwright';
 
-type Owner = { endpoint: string, stop: () => Promise<void> };
+type Owner = { endpoint: string, stderr: () => string, stop: () => Promise<void> };
 type Agent = { client: Client, browser: Browser, close: () => Promise<void> };
 
 test.skip(({ mcpBrowser }) => !['chrome', 'chromium', 'msedge'].includes(mcpBrowser!), 'Binds a Chromium-based persistent browser');
@@ -48,7 +48,12 @@ async function startOwner(testInfo: { outputPath: (...segments: string[]) => str
       process.stdin.resume();
     })();
   `);
-  const child = child_process.spawn(process.execPath, [script], { stdio: ['pipe', 'pipe', 'inherit'], env: { ...process.env, ...env } });
+  const child = child_process.spawn(process.execPath, [script], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, ...env } });
+  let stderr = '';
+  child.stderr.on('data', data => {
+    stderr += data;
+    process.stderr.write(data);
+  });
   const exited = new Promise(resolve => child.once('exit', resolve));
   const endpoint = await new Promise<string>((resolve, reject) => {
     let buffer = '';
@@ -59,7 +64,7 @@ async function startOwner(testInfo: { outputPath: (...segments: string[]) => str
     });
     child.once('exit', code => reject(new Error(`owner exited with ${code}`)));
   });
-  return { endpoint, stop: async () => { child.stdin.end(); await exited; } };
+  return { endpoint, stderr: () => stderr, stop: async () => { child.stdin.end(); await exited; } };
 }
 
 async function connectAgent(endpoint: string): Promise<Agent> {
@@ -102,6 +107,21 @@ test('an agent never adopts pages it did not open', async ({ server, mcpBrowser 
 
   await a.close();
   await b.close();
+  await owner.stop();
+});
+
+test('an agent tab opens behind the tab the user is looking at', async ({ server, mcpBrowser }, testInfo) => {
+  server.setContent('/a', '<title>A</title>', 'text/html');
+  const owner = await startOwner(testInfo, mcpBrowser === 'chromium' ? undefined : mcpBrowser, { DEBUG: 'pw:protocol' });
+  const agent = await connectAgent(owner.endpoint);
+  await agent.client.callTool({ name: 'browser_navigate', arguments: { url: server.PREFIX + '/a' } });
+
+  const created = owner.stderr().match(/"method":"Target\.createTarget","params":\{[^}]*\}/g);
+  expect(created).toHaveLength(1);
+  expect(created![0]).toContain('"background":true');
+  expect(owner.stderr().match(/"method":"Target\.activateTarget"/g)).toBeNull();
+
+  await agent.close();
   await owner.stop();
 });
 

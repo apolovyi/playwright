@@ -171,6 +171,10 @@ export abstract class Browser extends SdkObject {
     await progress.race(this._server.stop());
   }
 
+  isServed(): boolean {
+    return this._server.isStarted();
+  }
+
   protected didClose() {
     for (const context of this.contexts())
       context.browserClosed();
@@ -245,6 +249,10 @@ export class BrowserServer {
       metadata: options.metadata,
     });
     return { endpoint };
+  }
+
+  isStarted(): boolean {
+    return this._isStarted;
   }
 
   async stop() {
