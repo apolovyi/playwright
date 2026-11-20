@@ -14,7 +14,9 @@
  * limitations under the License.
  */
 
+import crypto from 'crypto';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { chromium } from 'playwright';
 
@@ -73,6 +75,7 @@ type TestFixtures = {
   server: TestServer;
   httpsServer: TestServer;
   mcpHeadless: boolean;
+  ownServerRegistry: void;
 };
 
 type WorkerFixtures = {
@@ -215,6 +218,26 @@ export const test = serverTest.extend<TestFixtures & TestOptions, WorkerFixtures
   },
 
   mcpServerType: ['mcp', { option: true }],
+
+  // A bound browser publishes a descriptor and a socket in per-user directories, which the developer's running
+  // browsers share. Resolving a remote endpoint also deletes every descriptor there that does not answer.
+  ownServerRegistry: [async ({}, use, testInfo) => {
+    const own = {
+      PWTEST_SERVER_REGISTRY: testInfo.outputPath('registry'),
+      // Unix socket paths are limited to 103 bytes, so sockets cannot live in the output directory.
+      PWTEST_SOCKETS_DIR: path.join(os.tmpdir(), 'pwmcp-' + crypto.createHash('sha1').update(testInfo.outputDir).digest('hex').slice(0, 16)),
+    };
+    const inherited = Object.fromEntries(Object.keys(own).map(name => [name, process.env[name]]));
+    Object.assign(process.env, own);
+    await use();
+    for (const [name, value] of Object.entries(inherited)) {
+      if (value === undefined)
+        delete process.env[name];
+      else
+        process.env[name] = value;
+    }
+    await fs.promises.rm(own.PWTEST_SOCKETS_DIR, { recursive: true, force: true });
+  }, { auto: true }],
 });
 
 async function createTransport(mcpServerType: TestOptions['mcpServerType'], options: { args: string[], env: NodeJS.ProcessEnv, cwd: string }): Promise<{
